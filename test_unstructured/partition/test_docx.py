@@ -68,6 +68,20 @@ def test_partition_docx_from_filename(
     if UNSTRUCTURED_INCLUDE_DEBUG_METADATA:
         assert {element.metadata.detection_origin for element in elements} == {"docx"}
 
+def test_partition_docx_accept_track_changes():
+    mock_document_file_path = example_doc_path("docx-tables_with_track_changes.docx")
+    elements = partition_docx(mock_document_file_path)
+    text = " ".join([item.text for item in elements])
+    all(
+        (
+            "HeaderWithTrackChanges" in text,
+            "CellWithTrackChanges" in text,
+            "TextWithTrackChanges" in text,
+            "FooterWithTrackChanges" in text
+        )
+    )
+    assert all
+
 
 def test_partition_docx_with_spooled_file(
     mock_document_file_path: str, expected_elements: list[Text]

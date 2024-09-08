@@ -9,7 +9,6 @@ import tempfile
 import zipfile
 from typing import IO, Any, Iterator, Optional, Protocol, Type
 
-# -- CT_* stands for "complex-type", an XML element type in docx parlance --
 import docx
 from docx.document import Document
 from docx.enum.section import WD_SECTION_START
@@ -22,6 +21,9 @@ from docx.text.hyperlink import Hyperlink
 from docx.text.pagebreak import RenderedPageBreak
 from docx.text.paragraph import Paragraph
 from docx.text.run import Run
+
+# -- CT_* stands for "complex-type", an XML element type in docx parlance --
+from lxml import etree
 from typing_extensions import TypeAlias
 
 from unstructured.chunking import add_chunking_strategy
@@ -58,6 +60,7 @@ from unstructured.partition.text_type import (
     is_possible_title,
     is_us_city_state_zip,
 )
+from unstructured.partition.utils import docx_helpers
 from unstructured.partition.utils.constants import PartitionStrategy
 from unstructured.utils import is_temp_file_path, lazyproperty
 
@@ -204,6 +207,7 @@ class DocxPartitionerOptions:
         metadata_last_modified: Optional[str],
         starting_page_number: int = 1,
         strategy: str | None = None,
+        accept_changes=True
     ):
         self._date_from_file_object = date_from_file_object
         self._file = file
@@ -213,6 +217,7 @@ class DocxPartitionerOptions:
         self._metadata_file_path = metadata_file_path
         self._metadata_last_modified = metadata_last_modified
         self._strategy = strategy
+        self._accept_changes = accept_changes
         # -- options object maintains page-number state --
         self._page_counter = starting_page_number
 
@@ -229,7 +234,10 @@ class DocxPartitionerOptions:
     @lazyproperty
     def document(self) -> Document:
         """The python-docx `Document` object loaded from file or filename."""
-        return docx.Document(self._docx_file)
+        _file = docx.Document(self._docx_file)
+        if self._accept_changes:
+            docx_helpers.accept_all_revisions_in_doc(_file)
+        return _file
 
     @lazyproperty
     def include_page_breaks(self) -> bool:
@@ -349,24 +357,24 @@ class DocxPartitionerOptions:
         return bool(self.document.element.xpath(xpath))
 
     @lazyproperty
-    def _docx_file(self) -> str | IO[bytes]:
+    def _docx_file(self) -> IO[bytes]:
         """The Word 2007+ document file to be partitioned.
 
-        This is either a `str` path or a file-like object. `python-docx` accepts either for opening
-        a document file.
+        This is either a `str` path or a file-like object. Accepts all track changes by default.
         """
         if self._file_path:
-            return self._file_path
+            with open(self._file_path, "rb") as f:
+                docx_stream = io.BytesIO(f.read())
 
         # -- In Python <3.11 SpooledTemporaryFile does not implement ".seekable" which triggers an
         # -- exception when Zipfile tries to open it. The docx format is a zip archive so we need
         # -- to work around that bug here.
         if isinstance(self._file, tempfile.SpooledTemporaryFile):
             self._file.seek(0)
-            return io.BytesIO(self._file.read())
+            docx_stream = io.BytesIO(self._file.read())
 
-        assert self._file is not None  # -- assured by `._validate()` --
-        return self._file
+        return docx_stream
+
 
     def _validate(self) -> DocxPartitionerOptions:
         """Raise on first invalide option, return self otherwise."""
@@ -1026,3 +1034,4 @@ class _NullPicturePartitioner:
         """No-op picture partitioner."""
         return
         yield
+
